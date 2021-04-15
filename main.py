@@ -19,7 +19,7 @@ reference = 1 * hdata**4
 
 
 for h in hdata:
-    rout = routine(f=(a,b,c), y0=np.array([4.0,4.0,4.0,4.0]), ordinaryStepLen=h, method="Kah")
+    rout = routine(f=fun, y0=np.array([4.0,4.0,4.0,4.0]), ordinaryStepLen=h, method="StV")
     yend = rout.run()
     print("*",end="")
     diffdata.append([*(yend-gammaend)])

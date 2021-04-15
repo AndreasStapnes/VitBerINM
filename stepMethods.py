@@ -51,7 +51,7 @@ class stepMethods:
         yNext = yValues + h / 9 * (F1 * 2 + F2 * 3 + F3 * 4)
         return yNext
 
-    @jit(nopython=False)
+    @jit(nopython=True)
     def Kah(matrixRepresentation, yvalues, t, h):
         a,b,c = matrixRepresentation
         n = len(a)
@@ -63,6 +63,20 @@ class stepMethods:
         A = np.identity(n) - 1/2*h*((M+N) + b)
         B = np.identity(n) + 1/2*h*b
         return np.linalg.solve(A, B@yvalues + c)
+
+    @jit(nopython=True)
+    def StV(function, yValues, t, h):
+        n = len(yValues)//2
+        q = yValues[:n]; p=yValues[n:];
+        F1 = (function(t, yValues))
+        F1P = F1[n:]
+        phalf = p + 1/2*h*F1P
+        qNext = q + h*phalf
+        F2 = function(t, np.concatenate((qNext, p)))
+        F2P = F2[n:]
+        pNext = phalf+1/2*h*F2P
+        yNext = np.concatenate((qNext, pNext))
+        return yNext
 
 
 
@@ -94,7 +108,7 @@ class routine:
 
     def run(self):
         self._load()
-        return self.method(self.function)
+        return self.method()
 
     def _load(self, timeline=False):
         tInterval = self.tFinal-self.tInit
@@ -113,9 +127,11 @@ class routine:
         elif(self.methodName in stepMethods.__dict__): method = stepMethods.__dict__[self.methodName]
         else: raise Exception("No applicable procedure found for method")
 
+        function = self.function
+
         if(timeline):
             @jit(nopython=True)
-            def execute(function):
+            def execute():
                 values = np.zeros((totalPoints,n))  *0.0 #Cast til float
                 times = np.zeros(totalPoints)       *0.0 #Cast til float for typesafety i jit
                 index = 0
@@ -132,7 +148,7 @@ class routine:
                 return times, values
         else:
             @jit(nopython=True)
-            def execute(function):
+            def execute():
                 y = methodYInitial
                 index = 0
                 while(index < normalSteps):
