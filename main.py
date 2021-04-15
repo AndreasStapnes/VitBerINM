@@ -46,9 +46,9 @@ class routine:
         self.y0 = kwargs.get("y0")
 
         self.method = None
-        self._load()
 
     def run(self):
+        self._load()
         return self.method(self.function)
 
     def _load(self):
@@ -64,18 +64,16 @@ class routine:
         methodYInitial = self.y0
         n = np.shape(self.y0)[0]
 
-
+        if(not self.methodName in stepMethods.__dict__): raise Exception("No applicable method found in stepMethods")
         method = stepMethods.__dict__[self.methodName]
 
         @jit(nopython=True)
-        def execute(function):
+        def executeGetTimeline(function):
             values = np.zeros((totalPoints,n))  *0.0 #Cast til float
             times = np.zeros(totalPoints)       *0.0 #Cast til float for typesafety i jit
             index = 0
             values[0,:]=methodYInitial
             times[0] = tInit
-
-
             while(index < normalSteps):
                 index += 1
                 values[index,:] = method(function, values[index-1,:], tInit+(index-1)*stepLen, stepLen)
@@ -85,12 +83,23 @@ class routine:
                 values[totalSteps,:] = method(function, values[totalSteps-1, :], tInit+(totalSteps-1)*stepLen, endStepLen)
                 times[totalSteps] = times[totalSteps-1] + endStepLen
             return times, values
+        @jit(nopython=True)
+        def execute(function):
+            y = methodYInitial
+            index = 0
+            while(index < normalSteps):
+                index += 1;
+                y = method(function, y, tInit+(index-1)*stepLen, stepLen)
+            if(endStep):
+                endStepLen = tInterval - normalSteps * stepLen
+                y = method(function, y, tInit + (totalSteps - 1) * stepLen, endStepLen)
+            return y
         self.method = execute
+        self.methodTimeline = executeGetTimeline
 
 
 @jit(nopython=True)
-def fun(t, y):
-    return np.array([y[2], y[3], -y[0]*(1+2*y[1]), -(y[1]+y[0]**2-y[1]**2)])
+def fun(t, y):  return np.array([y[2], y[3], -y[0]*(1+2*y[1]), -(y[1]+y[0]**2-y[1]**2)])
 from scipy import integrate
 
 
