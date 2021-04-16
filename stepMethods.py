@@ -3,46 +3,11 @@ from numba.experimental import jitclass
 from numba.typed import List
 import math
 import numpy as np
+from vectorAlgebra import *
 
-a = np.array([
-[[  0,      0,      0,      0],
- [  0,      0,      0,      0],
- [  0,      0,      0,      0],
- [  0,      0,      0,      0],],
 
-[[  0,      0,      0,      0],
- [  0,      0,      0,      0],
- [  0,      0,      0,      0],
- [  0,      0,      0,      0],],
 
-[[  0,     -2,      0,      0],
- [  0,      0,      0,      0],
- [  0,      0,      0,      0],
- [  0,      0,      0,      0],],
 
-[[ -1,      0,      0,      0],
- [  0,      1,      0,      0],
- [  0,      0,      0,      0],
- [  0,      0,      0,      0],]])*1.0
-
-b = np.array(
-   [[0, 0, 1, 0],
-    [0, 0, 0, 1],
-    [-1, 0, 0, 0],
-    [0, -1, 0, 0]])*1.0
-
-c = np.array([0,0,0,0])*1.0
-
-def emptyDecorator(f):
-    return f
-
-def normalize(zeta): return zeta/siz(zeta)
-def siz(zeta): return np.sqrt(np.sum(zeta**2))
-def orthoProj(a,b): return a-b*np.dot(a,b)/siz(b)**2
-def ortoHyperProj(a,B):
-    for b in B:
-        a = orthoProj(a,b)
-    return a
 
 class stepMethods:
     @jit(nopython=True)
@@ -90,32 +55,6 @@ class stepMethods:
 
     hasRollover = {"RK4":False, "BS3":False, "Kag":False, "StV":True}
 
-def ndimBasis(zeta):
-    zeta = normalize(zeta)
-    n = len(zeta)
-    stdBasis = np.identity(n).tolist()
-    Basis = [zeta]
-    while(len(Basis)!=n):
-        candidates = [ortoHyperProj(ei, Basis) for ei in stdBasis]
-        sizes = [*map(siz, candidates)]
-        maxArg = np.argmax(sizes)
-        Basis.append(normalize(candidates[maxArg]))
-    return Basis
-
-
-class plane:
-    def __init__(self, planePosition, **kwargs):
-        if('basis' in kwargs): self.basis = kwargs.get('basis')
-        elif('normal' in kwargs): self.basis = ndimBasis(kwargs.get("normal"))
-        else: raise Exception("Specify basis or normal")
-        self.normal = self.basis[0]
-        self.position = planePosition
-        if not (len(self.position) == len(self.normal)): raise Exception("Position and normal not in same vector-space")
-
-
-    def halfplane(self, position):
-        dot = np.dot(position-self.position, self.normal)
-        return 1 if dot > 0 else (0 if dot==0 else -1)
 
 
 
@@ -144,6 +83,9 @@ class routine:
         self.method = None
         self.nopython=kwargs.get('nopythonExe')
 
+        self.savePlaneCuts = kwargs.get("savePlaneCuts", False)
+        self.planes = []
+
     def run(self):
         self._load()
         return self.method()
@@ -163,16 +105,41 @@ class routine:
 
         function = self.function
         saveTimeline = self.saveTimeline
+        savePlaneCuts = self.savePlaneCuts
 
 
         methodHasRollover = stepMethods.hasRollover.get(self.methodName)
         rolloverInit = stepMethods.__dict__[self.methodName + "InitialRollover"](function, methodYInitial, tInit, stepLen) if methodHasRollover else None
 
+        dimension = len(methodYInitial)
+
+        planesAmt = len(self.planes)
+        planes = self.planes
+        planesLocations = np.array([pl.position for pl in planes])
+        planesNormals = np.array([pl.normal for pl in planes])
+        planesBasis = np.array([pl.basis for pl in planes])
+        @jit(nopython=True)
+        def jitRegisterCuts(inputPosition):
+            nonlocal planesLocations, planesAmt, planesNormals
+            def jitHalfPlane(inputPosition, planePosition, normal):
+                return np.sum((inputPosition - planePosition) * normal) >= 0
+            newCutState = [jitHalfPlane(inputPosition, planesLocations[enum], planesNormals[enum])
+                           for enum in range(planesAmt)]
+            return np.array(newCutState)
+
+        @jit(nopython=True)
+        def planeCutCoordinates(inputPusition, basis):
+            nonlocal dimension
+            crd = np.zeros(dimension-1)
+            for i in range(dimension-1):
+                crd[i] = np.sum(inputPusition*basis[i+1])
+            return crd
+
 
         decorator = jit(nopython=True) if self.nopython else emptyDecorator
         @decorator
         def execute():
-            nonlocal methodHasRollover, rolloverInit, saveTimeline, methodYInitial, totalPoints
+            nonlocal methodHasRollover, rolloverInit, saveTimeline, methodYInitial, totalPoints, planesBasis
             y = methodYInitial
             arr = times = None
             if(saveTimeline) :
@@ -183,13 +150,25 @@ class routine:
 
             index = 0
             rollover = rolloverInit
-            while(index < normalSteps):
 
+            cutpoints = [[]]*planesAmt
+            cutState = jitRegisterCuts(y)
+            def checkCuts():
+                nonlocal cutState
+                newCutState = jitRegisterCuts(y)
+                for i in range(planesAmt):
+                    if newCutState[i]!=cutState[i]:
+                        cutState[i]=newCutState[i]
+                        cutpoints[i].append(planeCutCoordinates(y, planesBasis[i]))
+
+
+            while(index < normalSteps):
                 time = tInit + index*stepLen
                 if(methodHasRollover) : y, rollover = method(function, y, time, stepLen, rollover)
                 else : y = method(function, y, time, stepLen)
                 index += 1;
                 if (saveTimeline): times[index] = time+stepLen; arr[index, :] = y
+                checkCuts()
             if(endStep):
                 endStepLen = tInterval - normalSteps * stepLen
                 time = tInit + normalSteps*stepLen
@@ -197,5 +176,7 @@ class routine:
                 else : y = method(function, y, time, endStepLen)
                 index += 1
                 if (saveTimeline): times[index] = time+endStepLen; arr[index, :] = y
-            return (arr, times) if saveTimeline else y
+            return ((arr, times, cutpoints) if savePlaneCuts else (arr, times)) \
+                                       if saveTimeline else \
+                            ((y, cutpoints) if savePlaneCuts else y)
         self.method = execute
