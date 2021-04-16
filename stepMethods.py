@@ -33,6 +33,16 @@ b = np.array(
 
 c = np.array([0,0,0,0])*1.0
 
+def emptyDecorator(f):
+    return f
+
+def normalize(zeta): return zeta/siz(zeta)
+def siz(zeta): return np.sqrt(np.sum(zeta**2))
+def orthoProj(a,b): return a-b*np.dot(a,b)/siz(b)**2
+def ortoHyperProj(a,B):
+    for b in B:
+        a = orthoProj(a,b)
+    return a
 
 class stepMethods:
     @jit(nopython=True)
@@ -80,6 +90,34 @@ class stepMethods:
 
     hasRollover = {"RK4":False, "BS3":False, "Kag":False, "StV":True}
 
+def ndimBasis(zeta):
+    zeta = normalize(zeta)
+    n = len(zeta)
+    stdBasis = np.identity(n).tolist()
+    Basis = [zeta]
+    while(len(Basis)!=n):
+        candidates = [ortoHyperProj(ei, Basis) for ei in stdBasis]
+        sizes = [*map(siz, candidates)]
+        maxArg = np.argmax(sizes)
+        Basis.append(normalize(candidates[maxArg]))
+    return Basis
+
+
+class plane:
+    def __init__(self, planePosition, **kwargs):
+        if('basis' in kwargs): self.basis = kwargs.get('basis')
+        elif('normal' in kwargs): self.basis = ndimBasis(kwargs.get("normal"))
+        else: raise Exception("Specify basis or normal")
+        self.normal = self.basis[0]
+        self.position = planePosition
+        if not (len(self.position) == len(self.normal)): raise Exception("Position and normal not in same vector-space")
+
+
+    def halfplane(self, position):
+        dot = np.dot(position-self.position, self.normal)
+        return 1 if dot > 0 else (0 if dot==0 else -1)
+
+
 
 class routine:
     def __init__(self, **kwargs):
@@ -101,8 +139,10 @@ class routine:
         self.methodName = kwargs.get("method", "RK4")
         self.function = kwargs.get("f")
         self.y0 = kwargs.get("y0")
+        self.saveTimeline=kwargs.get('timeline', False)
 
         self.method = None
+        self.nopython=kwargs.get('nopythonExe')
 
     def run(self):
         self._load()
@@ -114,6 +154,7 @@ class routine:
         normalSteps = int(np.floor(tInterval/self.ordinaryStepLen)) if not self.stepAmtBased else self.steps
         endStep = not self.stepAmtBased
         totalSteps = normalSteps + endStep
+        totalPoints = totalSteps + 1
         stepLen = float(self.ordinaryStepLen if not self.stepAmtBased else tInterval/self.steps)
         methodYInitial = self.y0
 
@@ -121,22 +162,40 @@ class routine:
         else: raise Exception("No applicable procedure found for method")
 
         function = self.function
+        saveTimeline = self.saveTimeline
+
 
         methodHasRollover = stepMethods.hasRollover.get(self.methodName)
         rolloverInit = stepMethods.__dict__[self.methodName + "InitialRollover"](function, methodYInitial, tInit, stepLen) if methodHasRollover else None
-        #@jit(nopython=True)
+
+
+        decorator = jit(nopython=True) if self.nopython else emptyDecorator
+        @decorator
         def execute():
-            nonlocal methodHasRollover, rolloverInit
+            nonlocal methodHasRollover, rolloverInit, saveTimeline, methodYInitial, totalPoints
             y = methodYInitial
+            arr = times = None
+            if(saveTimeline) :
+                arr = np.zeros((totalPoints,len(y),)) * 0.0;
+                arr[0,:] = y
+                times = np.zeros((totalPoints))    * 0.0;
+                times[0] = tInit
+
             index = 0
             rollover = rolloverInit
             while(index < normalSteps):
+
+                time = tInit + index*stepLen
+                if(methodHasRollover) : y, rollover = method(function, y, time, stepLen, rollover)
+                else : y = method(function, y, time, stepLen)
                 index += 1;
-                if(methodHasRollover) : y, rollover = method(function, y, tInit+(index-1)*stepLen, stepLen, rollover)
-                else : y = method(function, y, tInit+(index-1)*stepLen, stepLen)
+                if (saveTimeline): times[index] = time+stepLen; arr[index, :] = y
             if(endStep):
                 endStepLen = tInterval - normalSteps * stepLen
-                if(methodHasRollover): y, rollover = method(function, y, tInit + (totalSteps - 1) * stepLen, endStepLen, rollover)
-                else : y = method(function, y, tInit + (totalSteps - 1) * stepLen, endStepLen)
-            return y
+                time = tInit + normalSteps*stepLen
+                if(methodHasRollover): y, rollover = method(function, y, time, endStepLen, rollover)
+                else : y = method(function, y, time, endStepLen)
+                index += 1
+                if (saveTimeline): times[index] = time+endStepLen; arr[index, :] = y
+            return (arr, times) if saveTimeline else y
         self.method = execute
