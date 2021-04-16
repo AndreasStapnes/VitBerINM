@@ -1,4 +1,5 @@
 from numba import jit
+from numba.experimental import jitclass
 from numba.typed import List
 import math
 import numpy as np
@@ -57,30 +58,27 @@ class stepMethods:
         n = len(a)
         at = np.transpose(a, (0, 2, 1))
         N = np.sum(at * yvalues, axis=2)
-        #N = np.einsum('ijk,j->ik',a,yvalues)
         M = np.sum(a  * yvalues, axis=2)
-        #M = np.einsum('ijk,k->ij',a,yvalues)
         A = np.identity(n) - 1/2*h*((M+N) + b)
         B = np.identity(n) + 1/2*h*b
         return np.linalg.solve(A, B@yvalues + c)
 
     @jit(nopython=True)
-    def StV(function, yValues, t, h):
+    def StV(function, yValues, t, h, rollover):
         n = len(yValues)//2
         q = yValues[:n]; p=yValues[n:];
-        F1 = (function(t, yValues))
-        F1P = F1[n:]
+        F1P = rollover[n:]
         phalf = p + 1/2*h*F1P
         qNext = q + h*phalf
         F2 = function(t, np.concatenate((qNext, p)))
         F2P = F2[n:]
         pNext = phalf+1/2*h*F2P
         yNext = np.concatenate((qNext, pNext))
-        return yNext
+        return yNext, F2
+    def StVInitialRollover(function, yValues, t, h):
+        return function(t, yValues)
 
-
-
-
+    hasRollover = {"RK4":False, "BS3":False, "Kag":False, "StV":True}
 
 
 class routine:
@@ -116,46 +114,29 @@ class routine:
         normalSteps = int(np.floor(tInterval/self.ordinaryStepLen)) if not self.stepAmtBased else self.steps
         endStep = not self.stepAmtBased
         totalSteps = normalSteps + endStep
-        totalPoints = totalSteps + 1
-
         stepLen = float(self.ordinaryStepLen if not self.stepAmtBased else tInterval/self.steps)
-
         methodYInitial = self.y0
-        n = np.shape(self.y0)[0]
 
-        if(callable(self.methodName)):method=self.methodName
-        elif(self.methodName in stepMethods.__dict__): method = stepMethods.__dict__[self.methodName]
+        if(self.methodName in stepMethods.__dict__): method = stepMethods.__dict__[self.methodName]
         else: raise Exception("No applicable procedure found for method")
 
         function = self.function
 
-        if(timeline):
-            @jit(nopython=True)
-            def execute():
-                values = np.zeros((totalPoints,n))  *0.0 #Cast til float
-                times = np.zeros(totalPoints)       *0.0 #Cast til float for typesafety i jit
-                index = 0
-                values[0,:]=methodYInitial
-                times[0] = tInit
-                while(index < normalSteps):
-                    index += 1
-                    values[index,:] = method(function, values[index-1,:], tInit+(index-1)*stepLen, stepLen)
-                    times[index] = times[index-1] + stepLen
-                if(endStep):
-                    endStepLen = tInterval-normalSteps*stepLen
-                    values[totalSteps,:] = method(function, values[totalSteps-1, :], tInit+(totalSteps-1)*stepLen, endStepLen)
-                    times[totalSteps] = times[totalSteps-1] + endStepLen
-                return times, values
-        else:
-            @jit(nopython=True)
-            def execute():
-                y = methodYInitial
-                index = 0
-                while(index < normalSteps):
-                    index += 1;
-                    y = method(function, y, tInit+(index-1)*stepLen, stepLen)
-                if(endStep):
-                    endStepLen = tInterval - normalSteps * stepLen
-                    y = method(function, y, tInit + (totalSteps - 1) * stepLen, endStepLen)
-                return y
+        methodHasRollover = stepMethods.hasRollover.get(self.methodName)
+        rolloverInit = stepMethods.__dict__[self.methodName + "InitialRollover"](function, methodYInitial, tInit, stepLen) if methodHasRollover else None
+        #@jit(nopython=True)
+        def execute():
+            nonlocal methodHasRollover, rolloverInit
+            y = methodYInitial
+            index = 0
+            rollover = rolloverInit
+            while(index < normalSteps):
+                index += 1;
+                if(methodHasRollover) : y, rollover = method(function, y, tInit+(index-1)*stepLen, stepLen, rollover)
+                else : y = method(function, y, tInit+(index-1)*stepLen, stepLen)
+            if(endStep):
+                endStepLen = tInterval - normalSteps * stepLen
+                if(methodHasRollover): y, rollover = method(function, y, tInit + (totalSteps - 1) * stepLen, endStepLen, rollover)
+                else : y = method(function, y, tInit + (totalSteps - 1) * stepLen, endStepLen)
+            return y
         self.method = execute
