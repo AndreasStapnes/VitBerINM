@@ -1,10 +1,8 @@
 from numba import jit
-from numba.experimental import jitclass
+import numba
 from numba.typed import List
-import math
-import numpy as np
 from vectorAlgebra import *
-
+import numpy as np
 
 
 
@@ -53,7 +51,7 @@ class stepMethods:
     def StVInitialRollover(function, yValues, t, h):
         return function(t, yValues)
 
-    hasRollover = {"RK4":False, "BS3":False, "Kag":False, "StV":True}
+    hasRollover = {"RK4":False, "BS3":False, "Kah":False, "StV":True}
 
 
 
@@ -79,9 +77,10 @@ class routine:
         self.function = kwargs.get("f")
         self.y0 = kwargs.get("y0")
         self.saveTimeline=kwargs.get('timeline', False)
+        self.timelineJumps=kwargs.get('timelineJumps', 1)
 
         self.method = None
-        self.nopython=kwargs.get('nopythonExe')
+        self.nopython=kwargs.get('nopythonExe', False)
 
         self.savePlaneCuts = kwargs.get("savePlaneCuts", False)
         self.planes = []
@@ -101,7 +100,7 @@ class routine:
         methodYInitial = self.y0
 
         if(self.methodName in stepMethods.__dict__): method = stepMethods.__dict__[self.methodName]
-        else: raise Exception("No applicable procedure found for method")
+        else: raise Exception("No applicable method found for gived method-name")
 
         function = self.function
         saveTimeline = self.saveTimeline
@@ -118,6 +117,10 @@ class routine:
         planesLocations = np.array([pl.position for pl in planes])
         planesNormals = np.array([pl.normal for pl in planes])
         planesBasis = np.array([pl.basis for pl in planes])
+
+        jumpLen = self.timelineJumps
+        totTimelinePts = totalPoints // jumpLen
+
         @jit(nopython=True)
         def jitRegisterCuts(inputPosition):
             nonlocal planesLocations, planesAmt, planesNormals
@@ -135,7 +138,6 @@ class routine:
                 crd[i] = np.sum(inputPusition*basis[i+1])
             return crd
 
-
         decorator = jit(nopython=True) if self.nopython else emptyDecorator
         @decorator
         def execute():
@@ -143,39 +145,35 @@ class routine:
             y = methodYInitial
             arr = times = None
             if(saveTimeline) :
-                arr = np.zeros((totalPoints,len(y),)) * 0.0;
+                arr = np.zeros((totTimelinePts,len(y),)) * 0.0;
                 arr[0,:] = y
-                times = np.zeros((totalPoints))    * 0.0;
+                times = np.zeros((totTimelinePts))    * 0.0;
                 times[0] = tInit
 
             index = 0
             rollover = rolloverInit
 
-            cutpoints = [[]]*planesAmt
+            cutpoints = [[np.array([0.0])][:0]] * planesAmt
             cutState = jitRegisterCuts(y)
             def checkCuts():
-                nonlocal cutState
+                nonlocal cutState, cutpoints
                 newCutState = jitRegisterCuts(y)
-                for i in range(planesAmt):
-                    if newCutState[i]!=cutState[i]:
-                        cutState[i]=newCutState[i]
-                        cutpoints[i].append(planeCutCoordinates(y, planesBasis[i]))
+                if(planesAmt):
+                    for i in range(planesAmt):
+                        if newCutState[i]!=cutState[i]:
+                            cutState[i]=newCutState[i]
+                            cutpt = planeCutCoordinates(y, planesBasis[i])
+                            cutpoints[i].append(cutpt)
 
 
-            while(index < normalSteps):
+            while(index < totalSteps):
                 time = tInit + index*stepLen
-                if(methodHasRollover) : y, rollover = method(function, y, time, stepLen, rollover)
-                else : y = method(function, y, time, stepLen)
+                h = stepLen if index!=normalSteps else tInterval-normalSteps*stepLen
+                if(methodHasRollover) : y, rollover = method(function, y, time, h, rollover)
+                else : y = method(function, y, time, h)
                 index += 1;
-                if (saveTimeline): times[index] = time+stepLen; arr[index, :] = y
+                if (saveTimeline and index%jumpLen==0): times[index//jumpLen] = time+h; arr[index//jumpLen, :] = y
                 checkCuts()
-            if(endStep):
-                endStepLen = tInterval - normalSteps * stepLen
-                time = tInit + normalSteps*stepLen
-                if(methodHasRollover): y, rollover = method(function, y, time, endStepLen, rollover)
-                else : y = method(function, y, time, endStepLen)
-                index += 1
-                if (saveTimeline): times[index] = time+endStepLen; arr[index, :] = y
             return ((arr, times, cutpoints) if savePlaneCuts else (arr, times)) \
                                        if saveTimeline else \
                             ((y, cutpoints) if savePlaneCuts else y)

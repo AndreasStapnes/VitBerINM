@@ -38,7 +38,7 @@ qp0 = np.array([q01,q02,p01, p02])
 
 
 def U(y):
-    dim = np.shape(y)[1] // 2
+    dim = np.shape(y)[1]//2
     q = y[:, :dim]
     qSep = q.T
     return 1/2*np.sum(q*q, axis=1) + qSep[0]**2*qSep[1]-1/3*qSep[1]**3
@@ -51,4 +51,5 @@ def K(y):
 def H(y):
     return K(y)+ U(y)
 
-
+@jit(nopython=True)
+def fun(t, y):  return np.array([y[2], y[3], -y[0]*(1+2*y[1]), -(y[1]+y[0]**2-y[1]**2)])

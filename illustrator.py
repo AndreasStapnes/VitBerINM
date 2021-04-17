@@ -4,9 +4,9 @@ from matplotlib import animation
 
 pl = plane(np.array([0,0,0,0]), normal=np.array([1,0,0,0]))
 
-rout = routine(f=(a,b,c), tInit=0,tFinal=10000, y0=qp0, ordinaryStepLen=0.01,method="Kah",timeline=True, savePlaneCuts=True)
+rout = routine(f=fun, tInit=0,tFinal=1e4, y0=qp0, ordinaryStepLen=1e-4,method="RK4",timeline=True, savePlaneCuts=True, nopythonExe=True, timelineJumps=300)
 rout.planes.append(pl)
-y, times,cuts = rout.run()
+y,times,cuts = rout.run()
 
 
 q1,q2,p1,p2=y.T
