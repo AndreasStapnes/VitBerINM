@@ -53,3 +53,11 @@ def H(y):
 
 @jit(nopython=True)
 def fun(t, y):  return np.array([y[2], y[3], -y[0]*(1+2*y[1]), -(y[1]+y[0]**2-y[1]**2)])
+
+@jit(nopython=True)
+def goof(t, y, F):
+    F[0] = y[2]
+    F[1] = y[3]
+    F[2] = -y[0]*(1+2*y[1])
+    F[3] = -(y[1]+y[0]**2-y[1]**2)
+    #F[:] = np.array([y[2], y[3], -y[0]*(1+2*y[1]), -(y[1]+y[0]**2-y[1]**2)])

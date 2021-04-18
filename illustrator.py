@@ -4,10 +4,17 @@ from matplotlib import animation
 
 pl = plane(np.array([0,0,0,0]), normal=np.array([1,0,0,0]))
 
-rout = routine(f=fun, tInit=0,tFinal=1e4, y0=qp0, ordinaryStepLen=1e-2,method="RK4",timeline=True, savePlaneCuts=True, nopythonExe=True, timelineJumps=300)
-rout.planes.append(pl)
-y,times,cuts = rout.run()
+import time
 
+
+rout = routine(f=goof, tInit=0,tFinal=1000, y0=qp0, ordinaryStepLen=1e-4,method="RK4",timeline=True, savePlaneCuts=True, nopythonExe=True, timelineJumps=30)
+startT = time.time()
+rout.planes.append(pl)
+y, times, cuts = rout.run()
+endT = time.time()
+
+
+print(endT-startT)
 
 q1,q2,p1,p2=y.T
 q=np.array([q1,q2]).T
@@ -89,8 +96,9 @@ def expose(i):
 
 
 
-matplotlib.rcParams['animation.ffmpeg_path'] = r"../../ffmpegLibFiler/bin/ffmpeg.exe";
-writer = animation.FFMpegWriter(fps=30);
-fa = FuncAnimation(fig, expose, frames=frames,save_count=frames, init_func=init)
+#matplotlib.rcParams['animation.ffmpeg_path'] = r"../../ffmpegLibFiler/bin/ffmpeg.exe";
+#writer = animation.FFMpegWriter(fps=30);
+#fa = FuncAnimation(fig, expose, frames=frames,save_count=frames, init_func=init)
 #fa.save("fig.gif", fps=30)
-fa.save("illustrasjon.mp4",writer=writer,dpi=200)
+#fa.save("illustrasjon.mp4",writer=writer,dpi=200)
+

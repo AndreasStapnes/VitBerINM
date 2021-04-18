@@ -8,19 +8,23 @@ import numpy as np
 class stepMethods:
     @jit(nopython=True)
     def RK4(function, yValues, t, h):
-        F1 = function(t, yValues)
-        F2 = function(t + h / 2, yValues + h / 2 * F1)
-        F3 = function(t + h / 2, yValues + h / 2 * F2)
-        F4 = function(t + h, yValues + h * F3)
-        yNext = yValues + h / 6 * (F1 + 2 * F2 + 2 * F3 + F4)
+        dim = len(yValues)
+        Fs = np.zeros((4,dim))*1.0
+        function(t, yValues, Fs[0,:])
+        function(t + h / 2, yValues + h / 2 * Fs[0,:], Fs[1,:])
+        function(t + h / 2, yValues + h / 2 * Fs[1,:],Fs[2,:])
+        function(t + h, yValues + h * Fs[2,:], Fs[3,:])
+        yNext = yValues + h / 6 * (Fs[0,:] + 2 * Fs[1,:] + 2 * Fs[2,:] + Fs[3,:])
         return yNext
 
     @jit(nopython=True)
     def BS3(function, yValues, t, h):
-        F1 = function(t, yValues)
-        F2 = function(t + h / 2, yValues + h / 2 * F1)
-        F3 = function(t + 3 * h / 4, yValues + h * 3 / 4 * F2)
-        yNext = yValues + h / 9 * (F1 * 2 + F2 * 3 + F3 * 4)
+        dim = len(yValues)
+        Fs = np.zeros((3, dim))*1.0
+        function(t, yValues, Fs[0,:])
+        function(t + h / 2, yValues + h / 2 * Fs[0,:], Fs[1,:])
+        function(t + 3 * h / 4, yValues + h * 3 / 4 * Fs[1,:], Fs[2,:])
+        yNext = yValues + h / 9 * (Fs[0,:] * 2 + Fs[1,:] * 3 + Fs[2,:] * 4)
         return yNext
 
     @jit(nopython=True)
@@ -41,13 +45,17 @@ class stepMethods:
         F1P = rollover[n:]
         phalf = p + 1/2*h*F1P
         qNext = q + h*phalf
-        F2 = function(t, np.concatenate((qNext, p)))
+        F2 = np.zeros(len(yValues))*1.0
+        function(t, np.concatenate((qNext, p)), F2[:])
         F2P = F2[n:]
         pNext = phalf+1/2*h*F2P
         yNext = np.concatenate((qNext, pNext))
         return yNext, F2
     def StVInitialRollover(function, yValues, t, h):
-        return function(t, yValues)
+        dim = len(yValues)
+        F = np.zeros(dim)*1.0
+        function(t, yValues, F[:])
+        return F
 
     hasRollover = {"RK4":False, "BS3":False, "Kah":False, "StV":True}
 
@@ -196,7 +204,9 @@ class routine:
                     for i in range(planesAmt):
                         if newCutState[i]!=cutState[i]:
                             cutState[i]=newCutState[i]
-                            direction = functionCallable(time, y)
+                            dim = len(y)
+                            direction = np.zeros(dim)
+                            functionCallable(time, y, direction[:])
                             cutpt = planeCutCoordinates(direction, y, planesBasis[i], planesLocations[i])
                             cutpoints[i].append(cutpt)
 
