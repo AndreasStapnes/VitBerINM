@@ -92,11 +92,6 @@ class routine:
 
         self.methodName = kwargs.get("method", "RK4")
         self.function = kwargs.get("f")
-        if callable(self.function): self.functionCallable = self.function
-        elif 'functionCallable' in kwargs: self.functionCallable = kwargs.get('functionCallable')
-        elif not self.savePlaneCuts: self.functionCallable=None
-        else: raise Exception("Please specify \'functionCallable\' for use in linear regression")
-
 
     def run(self):
         self._load()
@@ -116,7 +111,6 @@ class routine:
         else: raise Exception("No applicable method found for gived method-name")
 
         function = self.function
-        functionCallable = self.functionCallable
 
 
         saveTimeline = self.saveTimeline
@@ -169,6 +163,7 @@ class routine:
         def execute():
             nonlocal methodHasRollover, rolloverInit, saveTimeline, methodYInitial, totalPoints, planesBasis
             y = methodYInitial
+            prevstepY = np.zeros_like(y)*1.0
             arr = times = None
             h = 0.0
             time = 0.0
@@ -204,9 +199,7 @@ class routine:
                     for i in range(planesAmt):
                         if newCutState[i]!=cutState[i]:
                             cutState[i]=newCutState[i]
-                            dim = len(y)
-                            direction = np.zeros(dim)
-                            functionCallable(time, y, direction[:])
+                            direction = y - prevstepY
                             cutpt = planeCutCoordinates(direction, y, planesBasis[i], planesLocations[i])
                             cutpoints[i].append(cutpt)
 
@@ -214,6 +207,7 @@ class routine:
             while(index < totalSteps):
                 time = tInit + index*stepLen
                 h = stepLen if index!=normalSteps else tInterval-normalSteps*stepLen
+                prevstepY = y;
                 if(methodHasRollover) : y, rollover = method(function, y, time, h, rollover)
                 else : y = method(function, y, time, h)
                 index += 1;
