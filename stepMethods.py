@@ -75,6 +75,10 @@ class routine:
 
         self.methodName = kwargs.get("method", "RK4")
         self.function = kwargs.get("f")
+        if callable(self.function): self.functionCallable = self.function
+        elif 'functionCallable' in kwargs: self.functionCallable = kwargs.get('functionCallable')
+        else: raise Exception("Please specify \'functionCallable\' for use in linear regression")
+
         self.y0 = kwargs.get("y0")
         self.saveTimeline=kwargs.get('timeline', False)
         self.timelineJumps=kwargs.get('timelineJumps', 1)
@@ -103,6 +107,9 @@ class routine:
         else: raise Exception("No applicable method found for gived method-name")
 
         function = self.function
+        functionCallable = self.functionCallable
+
+
         saveTimeline = self.saveTimeline
         savePlaneCuts = self.savePlaneCuts
 
@@ -121,6 +128,11 @@ class routine:
         jumpLen = self.timelineJumps
         totTimelinePts = totalPoints // jumpLen
 
+        global normalize, siz, dot
+        jitNormalize = jit(nopython=True)(normalize)
+        jitSiz = jit(nopython=True)(siz)
+        jitDot = jit(nopython=True)(dot)
+
         @jit(nopython=True)
         def jitRegisterCuts(inputPosition):
             nonlocal planesLocations, planesAmt, planesNormals
@@ -131,12 +143,17 @@ class routine:
             return np.array(newCutState)
 
         @jit(nopython=True)
-        def planeCutCoordinates(inputPusition, basis):
-            nonlocal dimension
+        def planeCutCoordinates(direction, inputPosition, basis, planePosition):
+            nonlocal dimension, methodHasRollover, function
+            planeNormal = basis[0]
+            planeDistance = jitDot((inputPosition-planePosition),planeNormal)
+            requiredTravel = -planeDistance/jitDot(planeNormal,direction)
+            position = inputPosition + requiredTravel*direction
             crd = np.zeros(dimension-1)
             for i in range(dimension-1):
-                crd[i] = np.sum(inputPusition*basis[i+1])
+                crd[i] = np.sum(position*basis[i+1])
             return crd
+
 
         decorator = jit(nopython=True) if self.nopython else emptyDecorator
         @decorator
@@ -144,25 +161,42 @@ class routine:
             nonlocal methodHasRollover, rolloverInit, saveTimeline, methodYInitial, totalPoints, planesBasis
             y = methodYInitial
             arr = times = None
+            h = 0.0
+            time = 0.0
+            index = 0
+
             if(saveTimeline) :
                 arr = np.zeros((totTimelinePts,len(y),)) * 0.0;
                 arr[0,:] = y
                 times = np.zeros((totTimelinePts))    * 0.0;
                 times[0] = tInit
-
-            index = 0
             rollover = rolloverInit
 
             cutpoints = [[np.array([0.0])][:0]] * planesAmt
+                                    #Jeg har ærlig talt ingen peiling på hvorfor dette fungerer
+                                    #dette er et resultat av timer med prøving og feiling.
+                                    #Koden som burde ha stått der et [[]]*planesAmt for å få
+                                    # en liste av planesAmt antall lister.
+                                    #Likevel har jeg en hypotese: Se for deg Jit er som en hund
+                                    # og numpy-float-arrays er en skinkebit. anta cutPoints er
+                                    # hundens mage. hundens mage vil senere bli fylt med skinkebiter
+                                    # men for at dette skal skje må hunden vite at den skal lete etter
+                                    # skinkebiter. Derfor må man gi en skinkebit til hunden og
+                                    # umiddelbart nappe den bort, altså sette inn [np.array([0.0])]
+                                    # i cutPoints, for deretter å fjerne denne med [:0]-indeksering
+
             cutState = jitRegisterCuts(y)
+
+
             def checkCuts():
-                nonlocal cutState, cutpoints
+                nonlocal cutState, cutpoints, function
                 newCutState = jitRegisterCuts(y)
                 if(planesAmt):
                     for i in range(planesAmt):
                         if newCutState[i]!=cutState[i]:
                             cutState[i]=newCutState[i]
-                            cutpt = planeCutCoordinates(y, planesBasis[i])
+                            direction = functionCallable(time, y)
+                            cutpt = planeCutCoordinates(direction, y, planesBasis[i], planesLocations[i])
                             cutpoints[i].append(cutpt)
 
 

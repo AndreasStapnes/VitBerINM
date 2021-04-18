@@ -32,6 +32,8 @@ def cross(A): #ndim cross prod
         ei = np.zeros(dim); ei[i]=1; ei = np.array([ei,])
         resultant[i] = np.linalg.det(np.concatenate([ei, A],axis=0))
     return resultant
+def dot(a,b):
+    return np.sum(a*b)
 
 class plane:
     def __init__(self, planePosition, **kwargs):
