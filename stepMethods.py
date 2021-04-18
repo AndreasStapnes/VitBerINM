@@ -5,8 +5,6 @@ from vectorAlgebra import *
 import numpy as np
 
 
-
-
 class stepMethods:
     @jit(nopython=True)
     def RK4(function, yValues, t, h):
@@ -73,11 +71,6 @@ class routine:
         if  (self.stepAmtBased):  self.steps=kwargs.get("steps")
         else                   :  self.ordinaryStepLen = kwargs.get("ordinaryStepLen", 1)
 
-        self.methodName = kwargs.get("method", "RK4")
-        self.function = kwargs.get("f")
-        if callable(self.function): self.functionCallable = self.function
-        elif 'functionCallable' in kwargs: self.functionCallable = kwargs.get('functionCallable')
-        else: raise Exception("Please specify \'functionCallable\' for use in linear regression")
 
         self.y0 = kwargs.get("y0")
         self.saveTimeline=kwargs.get('timeline', False)
@@ -88,6 +81,14 @@ class routine:
 
         self.savePlaneCuts = kwargs.get("savePlaneCuts", False)
         self.planes = []
+
+        self.methodName = kwargs.get("method", "RK4")
+        self.function = kwargs.get("f")
+        if callable(self.function): self.functionCallable = self.function
+        elif 'functionCallable' in kwargs: self.functionCallable = kwargs.get('functionCallable')
+        elif not self.savePlaneCuts: self.functionCallable=None
+        else: raise Exception("Please specify \'functionCallable\' for use in linear regression")
+
 
     def run(self):
         self._load()
@@ -191,7 +192,7 @@ class routine:
             def checkCuts():
                 nonlocal cutState, cutpoints, function
                 newCutState = jitRegisterCuts(y)
-                if(planesAmt):
+                if(planesAmt and savePlaneCuts):
                     for i in range(planesAmt):
                         if newCutState[i]!=cutState[i]:
                             cutState[i]=newCutState[i]
