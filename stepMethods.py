@@ -9,6 +9,7 @@ class stepMethods:
     '''
         Dette er en klasse hvilket i grunnen opptrer som et namespace.
         Instansiering av stepMethods-objekter her vil skape all verdens problemer, men dette ignoreres
+        instanser skapes aldri
 
         Implementerer her de numeriske metodene
         på en systematisk metode for å forenkle bruk
@@ -42,6 +43,10 @@ class stepMethods:
     for å beregne rollover-data for starten (oftest hvor man gjør en ekstra funk-
     sjons-evaluering, som i StV). Metoder med spesifisiert rollover må også returnere en ekstra 
     rollover variabel til bruk i neste tidssteg
+    
+    Alle metodene er definert som motpart til det oppgavens forfatter kaller 'bad-f'
+    det vil si, det antas funksjonene de bruker endrer verdiene til en input-referanse Fs
+    I denne oppgaven brukes funksjonen 'goof' definert i scenario.py
     '''
 
     '''
@@ -142,7 +147,7 @@ class routine:
 
         '''
 
-        #I de kommende linjene lagres alle instans-variablene
+        #I de kommende linjene lagres alle instans-variablene slik angitt ved initialisering
         self.tInit = kwargs.get("tInit", 0)
         self.tFinal = kwargs.get("tFinal", 1)
 
@@ -153,17 +158,18 @@ class routine:
         else                   :  self.ordinaryStepLen = kwargs.get("ordinaryStepLen", 1)
 
 
-        self.y0 = kwargs.get("y0")
-        self.saveTimeline=kwargs.get('timeline', False)
-        self.timelineJumps=kwargs.get('timelineJumps', 1)
+        self.y0 = kwargs.get("y0") #Henter den n-dimensjonale startverdien y
+        self.saveTimeline=kwargs.get('timeline', False) #Angir om en rekke punkter skal lagres for tilstander under integrasjonen
+        self.timelineJumps=kwargs.get('timelineJumps', 1) #Angir hopp mellom beregnede y-verdier som lagres (1 lagrer alle, 2 lager annen-hver osv.)
 
-        self.execution = None
-        self.nopython=kwargs.get('nopythonExe', False)
+        self.execution = None #Dette er metoden hvilket kalles i instans.run. Den defineres opprinnelig som none
 
-        self.savePlaneCuts = kwargs.get("savePlaneCuts", False)
+        self.nopython=kwargs.get('nopythonExe', False) #Angir hvorvidt execute skal jit-kompileres
+
+        self.savePlaneCuts = kwargs.get("savePlaneCuts", False) #Angir hvorvidt poincare-cuts skal lagres for plan i instans.planes
         self.planes = [] #Array av hyperplan aktuelle for poincare-kutt.
 
-        self.methodName = kwargs.get("method", "RK4")
+        self.methodName = kwargs.get("method", "RK4") #
         self.function = kwargs.get("f")
 
     #run er funksjonen en bruker når en ønsker å kjøre rutinen spesifisert av input-parametrene
@@ -201,60 +207,95 @@ class routine:
         methodHasRollover = stepMethods.hasRollover.get(self.methodName) # Henter om den aktuelle utviklingsmetoden inkluderer rollover (baserer seg på forrgige kjøring)
         rolloverInit = stepMethods.__dict__[self.methodName + "InitialRollover"](function, methodYInitial, tInit, stepLen) if methodHasRollover else None
 
-        dimension = len(methodYInitial)
-
+        dimension = len(methodYInitial)             #i våre beregninger blir dette alltid 4
+                                                    #men mulighet for vilkårlig-dimensjonelle systemer er inkludert
         planesAmt = len(self.planes)
         planes = self.planes
-        planesLocations = np.array([pl.position for pl in planes])
-        planesNormals = np.array([pl.normal for pl in planes])
-        planesBasis = np.array([pl.basis for pl in planes])
+        planesLocations = np.array([pl.position for pl in planes]) #Henter ut liste av alle plan-posisjoner
+        planesNormals = np.array([pl.normal for pl in planes]) #Henter ut liste av alle plan-normaler
+        planesBasis = np.array([pl.basis for pl in planes]) #Henter ut liste av alle plan-basiser
 
-        jumpLen = self.timelineJumps
-        totTimelinePts = totalPoints // jumpLen
+        jumpLen = self.timelineJumps                #Tallfester hopp mellom y-verdiene som lagres for return-y.
+        totTimelinePts = totalPoints // jumpLen     #Tallfester antall y-verdier som lagres for return-y-list
 
         global normalize, siz, dot
-        jitNormalize = jit(nopython=True)(normalize)
-        jitSiz = jit(nopython=True)(siz)
+        jitNormalize = jit(nopython=True)(normalize)    #Definerer ekvivalente vektor-algebra uttrykk som i
+        jitSiz = jit(nopython=True)(siz)                #vectorAlgebra.py, men som er jit-akselerert
         jitDot = jit(nopython=True)(dot)
 
+        '''
+        jitRegisterCuts er en en jit-akselerert metode hvilket for en gitt
+        input-parameter inputPosition angir hvilken side av alle relevante plan (fra instance.planes)
+        det gitte punktet ligger på. Den returnerer altså en liste av bools. 
+        I videre beregninger vil et 'kutt' registreres når man over ett tidssteg oppdager
+        en endring i en slik bool korresponderende til et plan.
+        '''
         @jit(nopython=True)
-        def jitRegisterCuts(inputPosition):
-            nonlocal planesLocations, planesAmt, planesNormals
-            def jitHalfPlane(inputPosition, planePosition, normal):
+        def jitRegisterCuts(inputPosition):             #
+            nonlocal planesLocations, planesAmt, planesNormals #Henter posisjoner, antall plan og plan-retninger
+            def jitHalfPlane(inputPosition, planePosition, normal): #Finner hvilken side ett punkt ligger i forhold til ett gitt plan
                 return np.sum((inputPosition - planePosition) * normal) >= 0
             newCutState = [jitHalfPlane(inputPosition, planesLocations[enum], planesNormals[enum])
                            for enum in range(planesAmt)]
-            return np.array(newCutState)
+                    #cutState vil kun tilsvare en liste (med rekkefølge som i rekkefølgen av
+                    #instans.planes) av bools hvor hver bool forteller om inputPusition er på oppsiden
+                    # (siden indikert av hyperplanets normal) (True) eller nedsiden (False)
+            return np.array(newCutState) #Returnerer newCutState men castet til numpy-array
 
+        '''
+        planesCutCoordinates er en jit-akselerert funksjon hvilket tar inn 
+        en ndim-array inputposition, samt en ndim-array direction
+        sammen med en ortogonal-basis og planePosition tilhørende et hyperplan.
+        Metoden vil finne punktet i planet (målt etter planets egen basis)
+        hvilket også ligger på aksen utspent av direction fra startpunktet inputPosition
+        Gitt direction er en vektor parallell med vektoren fra punkt før skjæring til punkt etter skæring
+        vil man finne den lineære interpolasjonen mellom disse punktene hvilket svarer til
+        skjæring.
+        '''
         @jit(nopython=True)
         def planeCutCoordinates(direction, inputPosition, basis, planePosition):
             nonlocal dimension, methodHasRollover, function
-            planeNormal = basis[0]
-            planeDistance = jitDot((inputPosition-planePosition),planeNormal)
-            requiredTravel = -planeDistance/jitDot(planeNormal,direction)
-            position = inputPosition + requiredTravel*direction
+            planeNormal = basis[0]              #Henter ut normalvektoren til hyperplanet
+            planeDistance = jitDot((inputPosition-planePosition),planeNormal) #Finner avstand fra inputposition til plan
+            requiredTravel = -planeDistance/jitDot(planeNormal,direction) #Finner antall ganger man må legge
+                                                #direction til inputPosition for å havne i det aktuelle hyperplan
+            position = inputPosition + requiredTravel*direction #finner posisjonen denne skjæringen korresponderer til
             crd = np.zeros(dimension-1)
-            for i in range(dimension-1):
-                crd[i] = np.sum(position*basis[i+1])
+            for i in range(dimension-1):        #Finner koordinatene for dette punktet angitt i hyperplanets
+                crd[i] = np.sum(position*basis[i+1]) #n-1 utspennende vektorer
             return crd
 
-
+        '''
+        Definerer her execute-funksjonen som kjøres når man ønsker å simulere systemet.
+        Først defineres en decorator, hvilket avhengig av om man satte nopyhtonExe til sann
+        ved instansiering, enten vil jit-kompilere funksjonen, eller gjøre ingenting.
+        Metoden henter methodYInitial, og integrerer stegvis med den angitte steg-prosedyren til
+        den til slutt returnerer y-verdier, tidspunkter og/eller plane-cuts avhengig av hva man 
+        tidligere ble spesifisert.
+        '''
         decorator = jit(nopython=True) if self.nopython else emptyDecorator
         @decorator
         def execute():
             nonlocal methodHasRollover, rolloverInit, saveTimeline, methodYInitial, totalPoints, planesBasis
-            y = methodYInitial
-            prevstepY = np.zeros_like(y)*1.0
-            arr = times = None
-            h = 0.0
-            time = 0.0
-            index = 0
+                        #Henter div variabler fra skop utenfor jit-akselerasjon
+            y = methodYInitial                  #Setter y lik start-y
+            prevstepY = np.zeros_like(y)*1.0    #Definerer previous-step
+            arr = times = None                  #definerer arr og times, hvilket
+                                                #forblir som none dersom saveTimeline er false
+                                                #eller blir redefinert som en numpy-array av verdier
+                                                #senere om saveTimeLine er true
+            h = 0.0                             #Deklarerer steglengde-variabelen
+            time = 0.0                          #Deklarerer current-time-variabelen
+            index = 0                           #Definerer index-variabel som angir index for steg
+                                                #hvilket stegvis økes opp til totalSteps under kjøring
 
-            if(saveTimeline) :
-                arr = np.zeros((totTimelinePts,len(y),)) * 0.0;
-                arr[0,:] = y
-                times = np.zeros((totTimelinePts))    * 0.0;
-                times[0] = tInit
+            if(saveTimeline) :                  #Redefinerer arr og times om saveTimeLine er True, som nevnt
+                arr = np.zeros((totTimelinePts,len(y),)) * 0.0; #For n-dimensjonelt-system vil arr bli
+                arr[0,:] = y                                    #en array av totTimeLinePts antall n-dimensjonelle verdier
+                times = np.zeros((totTimelinePts))    * 0.0;    #Times vil bli en totTimeLinePts lang skalar-liste
+                times[0] = tInit                #Man definerer første element i arr og t som initial-verdier
+
+
             rollover = rolloverInit
 
             cutpoints = [[np.array([0.0])][:0]] * planesAmt
@@ -269,32 +310,63 @@ class routine:
                                     # skinkebiter. Derfor må man gi en skinkebit til hunden og
                                     # umiddelbart nappe den bort, altså sette inn [np.array([0.0])]
                                     # i cutPoints, for deretter å fjerne denne med [:0]-indeksering
+                                    #Jeg skriver dette i frustrasjon
 
             cutState = jitRegisterCuts(y)
+                                    #Lagrer cut-state for start-posisjonen
 
-
+            '''
+            checkCuts er en metode hvilket stegvis sjekker om cutState, slik beregnet
+            i jitRegisterCuts, endres over et tidsteg for hvert plan. Dersom dette er tilfellet, 
+            vil punktets 'nedfall' i det aktuelle planet som ble skjært i forrige tidssteg
+            registreres. Metoden for 'nedfall' er lineær-regresjon med forrige y-verdi før skjæring
+            Nedfallets punkt i det aktuelle planets egne koordinaet registreres i listen cutpoints[i],
+            'i' er her indeksen til det gitte planet i instans.planes (rekkefølgen og indeks på planene bevares 
+            i alle metoder de er involvert i)
+            '''
             def checkCuts():
                 nonlocal cutState, cutpoints, function
-                newCutState = jitRegisterCuts(y)
-                if(planesAmt and savePlaneCuts):
-                    for i in range(planesAmt):
-                        if newCutState[i]!=cutState[i]:
-                            cutState[i]=newCutState[i]
-                            direction = y - prevstepY
+                newCutState = jitRegisterCuts(y) #Beregner ny cut-state
+                if(planesAmt and savePlaneCuts): #if-sjekk hvilket må være med for jit-kompilasjon
+                                                #enkelte metoder innenfor her er kun definert dersom en av disse
+                                                #er false. Selv om disse metodene aldri kjøres i dette tilfellet
+                                                #er if-setningen nødvendig for å få jit til å kompilere.
+                    for i in range(planesAmt): #Looper gjennom alle plan
+                        if newCutState[i]!=cutState[i]: #Sjekker om cutState endret med forrige
+                            cutState[i]=newCutState[i]  #Ved endring, endres cutState til ny verdi
+                            direction = y - prevstepY   #vektoren mellom det nåværende og det forrige punktet hentes
                             cutpt = planeCutCoordinates(direction, y, planesBasis[i], planesLocations[i])
+                                                        #skjæringen mellom aksen utspent av denne vektoren fra
+                                                        #den nåværende y-verdien med plan indeks i registreres
+                                                        # og lagres i cutpoints[i]
                             cutpoints[i].append(cutpt)
 
 
-            while(index < totalSteps):
-                time = tInit + index*stepLen
+            while(index < totalSteps):          #Looper gjennom alle steg som skal utføres
+                time = tInit + index*stepLen    #finner nåværende tidssteg
                 h = stepLen if index!=normalSteps else tInterval-normalSteps*stepLen
-                prevstepY = y;
+                                                #Bruker standard steglengde om man ikke
+                                                #handler med enstep. Beregner endstep dersom
+                                                #steget er et endstep (dvs index == (normalSteps-1)+1)
+                                                #normalSteps-1 er siste index med kvalifikasjon som normal step
+
+                prevstepY = y;                  #Setter forrige step til nåværende y
                 if(methodHasRollover) : y, rollover = method(function, y, time, h, rollover)
                 else : y = method(function, y, time, h)
-                index += 1;
+                                                #Beregner neste y-verdi. Avhengig av om metoden brukt har
+                                                #innebygget rollover, vil method-kallet reflektere dette
+                index += 1;                     #Øker index
                 if (saveTimeline and index%jumpLen==0): times[index//jumpLen] = time+h; arr[index//jumpLen, :] = y
+                                                #Dersom savetimeline er sann, og index mod jumpLen er 0
+                                                #vil det aktuelle elemenet lagres.
+                                                #(dvs hvert (jumpLen)-te element) vil lagres i times og arr
                 checkCuts()
             return ((arr, times, cutpoints) if savePlaneCuts else (arr, times)) \
                                        if saveTimeline else \
                             ((y, cutpoints) if savePlaneCuts else y)
+            #Om saveTimeline & savePlaneCuts er
+                    #True, True returneres arr, times, cutpoints
+                    #False, True returneres y_slutt, cutpoints
+                    #True, False returneres arr, times
+                    #False, False returneres y_slutt
         self.execution = execute
