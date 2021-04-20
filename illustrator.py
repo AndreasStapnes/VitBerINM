@@ -7,7 +7,7 @@ pl = plane(np.array([0,0,0,0]), normal=np.array([1,0,0,0]))
 import time
 
 
-rout = routine(f=(a,b,c), tInit=0,tFinal=10000, y0=qp0, ordinaryStepLen=1e-1,method="Kah",timeline=True, savePlaneCuts=True, nopythonExe=True, timelineJumps=30)
+rout = routine(f=goof, tInit=0,tFinal=10000, y0=qp0, ordinaryStepLen=1e-1,method="StV",timeline=True, savePlaneCuts=True, nopythonExe=True, timelineJumps=30)
 startT = time.time()
 rout.planes.append(pl)
 y, times, cuts = rout.run()
