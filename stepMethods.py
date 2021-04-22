@@ -15,25 +15,25 @@ class stepMethods:
         på en systematisk metode for å forenkle bruk
         i rutine-klassen. Alle metodene er jit-akselerert
         og vil videre anvendes i routine sin execute-prosedyre
-        (hvilket også vil jit-akselereres avhengig av om man spesifiserer dette ved instansiering)
+        (hvilket også vil jit-akselereres avhengig av om man spesifiserer dette under rutinens instansiering)
         '''
 
     '''
     Alle metodene er implementert på samme form. Dette vil si at de tar inn
-    en diff-liknings-funksjon f : y'=f(t,y) (egentlig f : f(t,y,F) -> F==y' med ikke badf slik angitt i anbefalingene),
+    en diff-liknings-funksjon f : y'=f(t,y) (egentlig f : f(t,y,F) -> F==y' uten 'badf' slik angitt i anbefalingene),
     start-y-verdi (y_n), et start-tidspunkt (t_n), og en steglengde h
     Metodene returnerer neste y-verdi (y_(n+1)).
 
-    (Selv om parameteren t_n strengt talt ikke er nødvendig, er dette implementert
+    (Selv om t_n strengt talt ikke er nødvendig i oppgaven, er denne parameteren implementert
     for å generalisere koden)
 
-    Ett unntak fra denne regelen er at Kahans metode ikke tar inn en funksjon, men
-    en tuppel matrixRepresentation hvilket består av matrisene a,b,c og formen (a,b,c) 
-    slik angitt i oppgaveteksten. Disse representerer funksjonen f, og vil brukes for å løse 
+    Ett unntak fra input-reglene er at Kahans metode ikke tar inn en funksjon, men
+    en tuppel matrixRepresentation hvilket består av matrisene a,b,c på formen (a,b,c) 
+    slik angitt i oppgaveteksten. Disse representerer funksjonen f, og vil brukes til å løse 
     for y_(n+1). Når man bruker Kahans metode vil man ved instansiering av route bruke
     (a,b,c) i stedet for function. Ingen andre steder enn i disse stepMethods-metodene vil
     innholdet av denne parameteren ha noe å si (den passeres rundt med den tolking at den
-    er et objekt hvilket kan brukes til å beregne y_n+1 fra y_n)
+    er et objekt hvilket kan brukes til å beregne y_(n+1) fra y_n)
 
     En annen ting som er verd å merke er at dette namespacet inneholder en dictionary
     hvilket beskriver om hver metode baserer seg på en 'rollover', dvs, om et
@@ -95,10 +95,10 @@ class stepMethods:
 
     '''
                 StV implementerer en Störmer-Verlet-metode
-                av orden 2 slik spesifiser i oppgaven. 
-                Merk at denne også tar inn rollover.
+                av orden 2 slik spesifisert i oppgaven. 
+                Merk at denne også tar inn rollover (da hasRollover for StV er True).
                 Under er det også definert en initialRollover-metode
-                hvilket produserer den første rollover-verdien til bruk
+                hvilket produserer rollover-verdien til bruk
                 i første funksjons-kjøring.
     '''
     @jit(nopython=True)
@@ -109,10 +109,10 @@ class stepMethods:
         phalf = p + 1/2*h*F1P   #F1P tilsvarer funksjons-evaluering i startpunkt, men kun P-komponentene
         qNext = q + h*phalf     #Finner en p-mellomverdi, og beregner qNext fra oppgavens prosedyre for StV
         F2 = np.zeros(len(yValues))*1.0
-        function(t, np.concatenate((qNext, p)), F2[:]) #Evaluerer F i sammensetning av qNest og p
+        function(t, np.concatenate((qNext, p)), F2[:]) #Evaluerer F i sammensetning av qNext og p
         F2P = F2[n:]
         pNext = phalf+1/2*h*F2P
-        yNext = np.concatenate((qNext, pNext))  #Definerer YNext, definert som sammensetning av pNext og qNext
+        yNext = np.concatenate((qNext, pNext))  #Definerer yNext, definert som sammensetning av pNext og qNext
         return yNext, F2        #F2 er rollover-data-pakken. Dette tilsvarer F1 i neste kjøring
     def StVInitialRollover(function, yValues, t, h):
         dim = len(yValues)
@@ -131,7 +131,7 @@ class routine:
         :param kwargs:
             (float) tInit, tFinal                               | default: tInit=0, tFinal=1
             (float) ordinaryStepLen eller (int) steps           | default: ordinaryStepLen=1
-            (string) method {RK4, BS3, Ka2, SV2}                | default: RK4
+            (string) method {RK4, BS3, Kah, StV}                | default: RK4
             (ndim float) y0                                     | default: 0-vec
             (objekt hvilket representerer f:y'=f) f             | default: 0-function
 
@@ -174,7 +174,7 @@ class routine:
         self.methodName = kwargs.get("method", "RK4") #Henter navnt på metode. Må tilsvare en funksjon i stepMethods
         self.function = kwargs.get("f")
 
-    #run er funksjonen anvendes når en ønsker å kjøre rutinen spesifisert av input-parametrene
+    #run er funksjonen som anvendes når en ønsker å kjøre rutinen spesifisert av input-parameterene
     #Den kaller på _load hvilket forbereder kjøring. Deretter utfører den self.execution som skapes fra _load.
     #Resultatet fra execcution blir returnert av run.
     def run(self):
@@ -196,7 +196,7 @@ class routine:
     #Funksjon som ikke skal kalles utenfra. _load forbereder kjøring av prosedyren, deriblant med å (avhengig av valg) jit-kompilere prosedyren
     def _load(self, timeline=False):
         #Først vil load hente ut en rekke verdier fra self. Ingen self-verdier annet enn
-        #execution skal endres under en  (for å tillate gjenbrukhet).
+        #execution skal endres under kjøringen  (for å tillate gjenbrukhet).
 
         tInterval = self.tFinal-self.tInit          #Definerer lengde på t-intervallet
         tInit = self.tInit                          #Henter ut start-tidspunkt
@@ -204,7 +204,7 @@ class routine:
                                                     #NormalSteps er antall steg hvilket vil utføres med
         endStep = not self.stepAmtBased             #'vanlig steglengde'. Dersom prosedyren er step-length-basert,
                                                     #legges det også til et sluttsteg hvis eksistens er beskrevet av bool endStep
-                                                    #sluttsteget forsikrer man at metoden avsluttes ved tFinal
+                                                    #sluttsteget forsikrer man om at metoden avsluttes ved tFinal
                                                     #selv om steglengden ikke går opp i tInterval
         totalSteps = normalSteps + endStep          #Variabel hvilket beskriver totalt antall steg prosedyren baseres på
         totalPoints = totalSteps + 1                #Variabel hvilket beskriver totalt antall y-verdier som prosedyren gjennomgår
@@ -240,7 +240,7 @@ class routine:
 
         global normalize, siz, dot
         jitNormalize = jit(nopython=True)(normalize)    #Definerer ekvivalente vektor-algebra uttrykk som i
-        jitSiz = jit(nopython=True)(siz)                #vectorAlgebra.py, men som er jit-akselerert
+        jitSiz = jit(nopython=True)(siz)                #vectorAlgebra.py, men som her er jit-akselerert
         jitDot = jit(nopython=True)(dot)
 
         '''
@@ -295,7 +295,7 @@ class routine:
         den til slutt returnerer y-verdier, tidspunkter og/eller plane-cuts avhengig av hva man 
         tidligere hadde spesifisert.
         '''
-        decorator = jit(nopython=True) if self.nopython else emptyDecorator
+        decorator = jit(nopython=True) if self.nopython else emptyDecorator #Angir om funksjonen kompileres med jit
         @decorator
         def execute():
             nonlocal methodHasRollover, rolloverInit, saveTimeline, methodYInitial, totalPoints, planesBasis

@@ -30,7 +30,7 @@ def ortoHyperProj(a,B): #funksjon hvilket finner ortogonal projeksjon av a på a
     return a
 def cross(A): #ndimensjonelt kryssprodukt, dvs, finner vektoren ortogonal på n-1 kryssede n-dim-vektorer.
               #Definisjonen er som i 3d-kryss prod, altså determinant av en rad i,j,k,... av enhetsvektorer,
-              # tterfulgt av koordinater for n-1 vektorer på rad-form.
+              #etterfulgt av koordinater for n-1 vektorer på rad-form.
     sh = np.shape(A)
     dim = sh[1]
     if(not sh[0]+1 == sh[1]): raise Exception("Inconsistent cross product")
