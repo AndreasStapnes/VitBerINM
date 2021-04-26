@@ -119,7 +119,31 @@ class stepMethods:
         function(t, yValues, F[:])
         return F
 
-    hasRollover = {"RK4":False, "BS3":False, "Kah":False, "StV":True}
+    @jit(nopython=True)
+    def Eul(function, yValues, t, h):
+        F = np.zeros(len(yValues))
+        function(t, yValues, F[:])
+        return yValues + h*F;
+
+    @jit(nopython=True)
+    def Trp(function, yValues, t, h):
+        F1 = np.zeros(len(yValues))
+        function(t, yValues, F1[:])
+        F2 = np.zeros(len(yValues))
+        function(t+h, yValues+h*F1, F2[:])
+        return yValues + h*(F1+F2)/2
+
+    @jit(nopython=True)
+    def Mid(function, yValues, t, h):
+        F1 = np.zeros(len(yValues))
+        function(t, yValues, F1[:])
+        F2 = np.zeros(len(yValues))
+        function(t+h/2, yValues+h/2*F1, F2[:])
+        return yValues + h*F2
+
+
+    hasRollover = {"RK4":False, "BS3":False, "Kah":False, "StV":True,
+                   "Eul":False, "Trp":False, "Mid":False}
 
 
 
