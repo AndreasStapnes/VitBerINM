@@ -1,7 +1,6 @@
 from numba import jit
 import numpy as np
 import matplotlib.pyplot as plt
-from scenario import *
 from stepMethods import *
 
 @jit(nopython=True)
