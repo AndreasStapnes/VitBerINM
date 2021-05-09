@@ -179,9 +179,18 @@ class routine:
         #Avhengig om stepAmtBased/step-Amount-based eller step-length-based vil det lagres antall steps eller steg-lengde
         #til å benyttes i videre algoritmer for routine-instansen.
         #Man må enten spesifisere antall steg, eller lengden på et steg.
+        if(all([i in kwargs for i in ["steps", "ordinaryStepLen", "tFinal"]])) : raise Exception("cannot specify steps & tFinal & ordinaryStepLen")
+
         self.stepAmtBased = "steps" in kwargs
-        if  (self.stepAmtBased):  self.steps=kwargs.get("steps")
-        else                   :  self.ordinaryStepLen = kwargs.get("ordinaryStepLen", 1)
+        if  (self.stepAmtBased):
+            self.steps = kwargs.get("steps")
+            if(not (("tFinal" in kwargs) or ("ordinaryStepLen" in kwargs))):  raise Exception("must specify tFinal or ordinaryStepLen when steps is set")
+            if("tFinal" in kwargs)                  : pass                    #tFinal & steps spesifisert. tFinal allerede hentet. steps allerede hentet. pass
+            else                                    :                         #ordinaryStepLen & steps spesifisert. Må beregne tFinal.
+                self.ordinaryStepLen = kwargs.get("ordinaryStepLen")
+                self.tFinal = self.ordinaryStepLen * self.steps
+        else                                        :                         #ordinaryStepLen & tFinal spesifisert. tFinal allerede hentet ut.
+            self.ordinaryStepLen = kwargs.get("ordinaryStepLen", 1)
 
 
         self.y0 = kwargs.get("y0") #Henter den n-dimensjonale startverdien y
